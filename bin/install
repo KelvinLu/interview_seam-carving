@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+
+set -o pipefail
+set -o errexit
+set -o nounset
+
+declare -r base_dir=$(dirname $(cd $(dirname $0) && pwd))
+
+which bundle 1>/dev/null 2>/dev/null
+
+cd "${base_dir}"
+bundle install

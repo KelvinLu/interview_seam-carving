@@ -1,0 +1,67 @@
+#!/usr/bin/env ruby
+
+require 'chunky_png'
+
+width = nil
+y = 0
+rows = []
+
+def warn(msg)
+  $stderr.puts "\x1B[31;1m#{msg}\x1B[0m"
+end
+
+def success(msg)
+  $stderr.puts "\x1B[32;1m#{msg}\x1B[0m"
+end
+
+def info(msg)
+  $stderr.puts "\x1B[1m#{msg}\x1B[0m"
+end
+
+begin
+  while (row = $stdin.readline.split(',').compact)
+    y += 1
+
+    unless ((length = row.length) % 4).zero?
+      warn "Row #{y}'s elements could not be formed into 4-tuples (got #{length} % 4 = #{length % 4})"
+      exit 1 if y == 1
+    end
+
+    info "Assuming from input: image width is #{width = length / 4} pixels" if width.nil?
+
+    warn "Row #{y} has mismatched number of elements (expected #{width}, got #{length / 4})" unless width * 4 == length
+
+    x = 0
+    for i in (0..(length - 1)).step(4)
+      x += 1
+      red, green, blue, alpha = row[i, 4]
+
+      begin
+        [:red, :green, :blue, :alpha].each do |channel|
+          v = binding.local_variable_get(channel)
+
+          raise "#{channel}-channel value is not an integer (is '#{v}')" if (v =~ /^[0-9]+$/).nil?
+          raise "#{channel}-channel value is less than 0 (is #{v})" if v.to_i < 0
+          raise "#{channel}-channel value is greater than 255 (is #{v})" if v.to_i > 255
+        end
+      rescue StandardError => e
+        warn "Pixel at (#{y}, #{x}): #{e.message}"
+      end
+
+    end
+
+    rows << (0..(length - 1)).step(4).map { |i| ChunkyPNG::Color.rgba(*row[i, 4].map(&:to_i)) }
+  end
+rescue EOFError
+end
+
+height = rows.length
+image = ChunkyPNG::Canvas.new(width, height)
+
+for y in 0..(height - 1)
+  image.replace_row!(y, rows[y])
+end
+
+image.write($stdout) if ARGV.include? '-o'
+
+success "Formed a #{width}px-by-#{height}px image"

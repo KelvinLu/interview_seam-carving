@@ -1,0 +1,16 @@
+#!/usr/bin/env ruby
+
+require 'chunky_png'
+
+if ARGV.length > 0
+  $stderr.puts "Usage: #{__FILE__} (program reads from standard input)"
+  exit 1
+end
+
+image = ChunkyPNG::Image.from_io($stdin)
+
+for y in 0..(image.height-1)
+  $stdout.puts image.row(y).map { |color|
+    ChunkyPNG::Color.to_truecolor_alpha_bytes(color)
+  }.flatten.join(',')
+end

@@ -1,0 +1,418 @@
+#!/usr/bin/env ruby
+
+require 'optparse'
+require 'chunky_png'
+require 'matrix'
+
+def warn(msg)
+  $stderr.puts "\x1B[31;1m#{msg}\x1B[0m"
+end
+
+def success(msg)
+  $stderr.puts "\x1B[32;1m#{msg}\x1B[0m"
+end
+
+def info(msg)
+  $stderr.puts "\x1B[1m#{msg}\x1B[0m"
+end
+
+def read_io_matrix_color(io)
+  width = nil
+  rows = []
+
+  begin
+    while (row = io.readline.split(',').compact)
+      raise 'Row elements could not be formed into 4-tuples' unless ((length = row.length) % 4).zero?
+      width ||= length / 4
+      raise "Row has mismatched number of elements (expected #{width}, got #{length / 4})" unless width * 4 == length
+
+      rows << (0..(length - 1)).step(4).map { |i| ChunkyPNG::Color.rgba(*row[i, 4].map(&:to_i)) }
+    end
+  rescue EOFError
+  end
+
+  Matrix.rows(rows, copy = false)
+end
+
+def read_io_matrix_color(io)
+  width = nil
+  rows = []
+
+  begin
+    while (row = io.readline.split(',').compact)
+      raise 'Row elements could not be formed into 4-tuples' unless ((length = row.length) % 4).zero?
+      width ||= length / 4
+      raise "Row has mismatched number of elements (expected #{width}, got #{length / 4})" unless width * 4 == length
+
+      rows << (0..(length - 1)).step(4).map { |i| ChunkyPNG::Color.rgba(*row[i, 4].map(&:to_i)) }
+    end
+  rescue EOFError
+  end
+
+  Matrix.rows(rows, copy = false)
+end
+
+def write_io_matrix_color(image)
+  for i in 0..(image.row_count - 1)
+    $stdout.puts image.row(i).map { |color|
+      ChunkyPNG::Color.to_truecolor_alpha_bytes(color)
+    }.to_a.flatten.join(',')
+  end
+end
+
+def write_io_matrix_normalized_scalar(m)
+  for i in 0..(m.row_count - 1)
+    $stdout.puts m.row(i).map { |v|
+      v = (v * 255).to_i
+      [v, v, v, 255]
+    }.to_a.flatten.join(',')
+  end
+end
+
+def write_io_matrix_seam(image, seam, orientation: :vertical, overlay: :image)
+  r = image.row_count
+  c = image.column_count
+  l = orientation == :vertical ? r : c
+  raise "Seam length (#{seam.length}) does not match #{orientation}-length of image (#{l})!" if seam.length != l
+
+  image = normalize(image).map { |v| (v * 255.0).to_i } if overlay == :scalar
+
+  for i in 0..(r - 1)
+    case overlay
+    when :image
+      row = image.row(i).map { |color|
+        ChunkyPNG::Color.to_truecolor_alpha_bytes(color)
+      }.to_a
+    when :scalar
+      row = image.row(i).map { |v| [v, v, v, 255] }.to_a
+    else
+      row = Array.new(c, [0, 0, 0, 150])
+    end
+
+    if orientation == :vertical
+      row[seam[i]] = [255, 0, 255, 255]
+    else
+      c.times.select { |j| seam[j] == i }.each { |j| row[j] = [255, 0, 255, 255] }
+    end
+
+    $stdout.puts row.flatten.join(',')
+  end
+end
+
+def normalize(m)
+  min, max = m.minmax
+  range = (max - min).to_f
+
+  m.map { |v|
+    (v - min) / range
+  }
+end
+
+def power(m, p = (1 / 3.8))
+  m.map { |v| v ** p }
+end
+
+def intensity(image, gamma = 2.2)
+  image.map { |color|
+    r, g, b, a = ChunkyPNG::Color.to_truecolor_alpha_bytes(color)
+
+    [
+      1.0,
+      (
+        (0.2126 * (r / 255.0) ** gamma) +
+        (0.7152 * (g / 255.0) ** gamma) +
+        (0.0722 * (b / 255.0) ** gamma)
+      )
+    ].min
+  }
+end
+
+def sobel(m, crop_mask: nil, preserve_mask: nil)
+  r = m.row_count
+  c = m.column_count
+  raise 'Matrix too small!' if r < 3 or c < 3
+
+  if crop_mask && crop_mask.row_count != r && crop_mask.column_count != c
+    raise 'Crop mask dimensions do not fit that of sobel input'
+  end
+  if preserve_mask && preserve_mask.row_count != r && preserve_mask.column_count != c
+    raise 'Preservation mask dimensions do not fit that of sobel input'
+  end
+
+  g = Matrix.build(r - 2, c - 2) { |i, j|
+    (
+      ((
+        m[i, j] +
+        2 * m[i, j + 1] +
+        m[i, j + 2] -
+        m[i + 2, j] -
+        2 * m[i + 2, j + 1] -
+        m[i + 2, j + 2]
+      ) ** 2) +
+      ((
+        m[i, j] +
+        2 * m[i + 1, j] +
+        m[i + 2, j] -
+        m[i, j + 2] -
+        2 * m[i + 1, j + 2] -
+        m[i + 2, j + 2]
+      ) ** 2)
+    ) ** 0.5
+  }
+
+  if crop_mask
+    g = Matrix.build(r - 2, c - 2) { |i, j|
+      crop_mask[i + 1, j + 1] ? -5.657 : g[i, j]
+    }
+  end
+
+  if preserve_mask
+    g = Matrix.build(r - 2, c - 2) { |i, j|
+      preserve_mask[i + 1, j + 1] ? 5.657 : g[i, j]
+    }
+  end
+
+  g
+end
+
+def mask(image)
+  image.map { |color|
+    r, g, b, a = ChunkyPNG::Color.to_truecolor_alpha_bytes(color)
+
+    r + g + b > 0
+  }
+end
+
+def seam(m, orientation: :vertical, pad: true)
+  m = m.transpose if orientation == :horizontal
+
+  r = m.row_count
+  c = m.column_count
+  raise 'Matrix too small!' if r < 3 or c < 3
+
+  # Memomize path costs via dynamic programming
+  curr_row = m.row(0)
+  memo_rows = [curr_row.to_a]
+
+  for i in 1..(r - 1)
+    prev_row = memo_rows.last
+    curr_row = m.row(i)
+    memo_row = []
+
+    x_l = nil
+    x_c = prev_row[0]
+    x_r = prev_row[1]
+
+    # at j = 0
+    memo_row << [x_c, x_r].min + curr_row[0]
+
+    for j in 1..(c - 2)
+      x_l = x_c
+      x_c = x_r
+      x_r = prev_row[j + 1]
+      memo_row << [x_l, x_c, x_r].min + curr_row[j]
+    end
+
+    # at j = c - 1
+    memo_row << [x_c, x_r].min + curr_row[-1]
+
+    memo_rows << memo_row
+  end
+
+  memo = Matrix.rows(memo_rows, copy = true)
+
+  # Find the seam by backtracking through the memoized matrix
+  path = []
+
+  # at i = r -1
+  j = memo.row(-1).each_with_index.min[1]
+  path << j
+
+  for i in (r - 2).downto(0)
+    x_l = memo[i, (j_l = j > 1 ? j - 1 : 0)]
+    x_c = memo[i, (j_c = j)]
+    x_r = memo[i, (j_r = j < c - 1 ? j + 1 : c - 1)]
+
+    if x_l < x_c && x_l < x_r
+      j = j_l
+    elsif x_r < x_l && x_r < x_c
+      j = j_r
+    end
+
+    path << j
+  end
+
+  path.reverse!
+
+  if pad
+    path = path.unshift(path.first)
+    path = path.push(path.last)
+  end
+
+  memo = memo.transpose if orientation == :horizontal
+
+  return path, memo
+end
+
+def carve(m, seam, orientation: :vertical)
+  m = m.transpose if orientation == :horizontal
+  r = m.row_count
+  c = m.column_count
+
+  rows = []
+
+  for y in 0..(r - 1)
+    row = m.row(y).to_a
+    i = seam[y]
+
+    if i == 0
+      rows << row[1..-1]
+    elsif i == c - 1
+      rows << row[0..-2]
+    else
+      rows << row[0..(i - 1)] + row[(i + 1)..-1]
+    end
+  end
+
+  m = Matrix.rows(rows, copy = true)
+
+  orientation == :vertical ? m : m.transpose
+end
+
+def options
+  outputs = [
+    :image,
+    :intensity,
+    :sobel,
+    :memo,
+    :memo_curved,
+    :seam,
+    :seam_overlay_image,
+    :seam_overlay_sobel,
+    :seam_overlay_memo
+  ]
+  orientations = [:vertical, :horizontal]
+
+  opts = {
+    verbose:            false,
+    iterations:         1,
+    output:             outputs.first,
+    orientation:        orientations.first,
+    crop_mask:          nil,
+    preserve_mask:      nil
+  }
+
+  OptionParser.new do |o|
+    o.banner = "Usage: #{__FILE__} [options]"
+
+    o.on(
+      '-v', '--[no-]verbose',
+      "Run with verbose output on STDERR (default: #{opts[:verbose]})"
+    ) do |v|
+      opts[:verbose] = v
+    end
+
+    o.on(
+      '-n', '--iterations ITERATIONS', OptionParser::DecimalInteger,
+      "Number of iterations of seam carving to perform (default: #{opts[:iterations]})"
+    ) do |n|
+      raise 'ITERATIONS must be greater than zero' unless n > 0
+      opts[:iterations] = n
+    end
+
+    o.on(
+      '-t', '--text TYPE', outputs,
+      "Type of text output to produce (#{outputs.join ', '}, default: #{opts[:output]})"
+    ) do |t|
+      opts[:output] = t
+    end
+
+    o.on(
+      '-o', '--orientation TYPE', orientations,
+      "Orientation of seams (#{orientations.join ', '}, default: #{opts[:orientation]})"
+    ) do |t|
+      opts[:orientation] = t
+    end
+
+    o.on(
+      '--crop-mask IMAGE',
+      'Specify an image to use as a crop mask'
+    ) do |i|
+      opts[:crop_mask] = i
+    end
+
+    o.on(
+      '--preserve-mask IMAGE',
+      'Specify an image to use as a preservation mask'
+    ) do |i|
+      opts[:preserve_mask] = i
+    end
+
+  end.parse!
+
+  opts
+end
+
+def main
+  opts = options
+
+  prev_image = image = read_io_matrix_color($stdin)
+
+  info "Performing iteration 1/#{opts[:iterations]}" if opts[:verbose]
+
+  crop_mask = opts[:crop_mask] ? mask(read_io_matrix_color(IO.new(IO.sysopen(opts[:crop_mask], 'r'), 'r'))) : nil
+  preserve_mask = opts[:preserve_mask] ? mask(read_io_matrix_color(IO.new(IO.sysopen(opts[:preserve_mask], 'r'), 'r'))) : nil
+
+  image_intensity               = intensity(image)
+  image_sobel                   = sobel(
+                                    image_intensity,
+                                    crop_mask: crop_mask,
+                                    preserve_mask: preserve_mask
+                                  )
+  image_seam, image_memo        = seam(image_sobel, orientation: opts[:orientation], pad: true)
+
+  for n in 2..opts[:iterations] do
+    info "Performing iteration #{n}/#{opts[:iterations]}" if opts[:verbose]
+
+    prev_image                  = image
+
+    # No need to recompute intensity, since it's a spatially-invariant and local feature!
+    image                       = carve(image, image_seam, orientation: opts[:orientation])
+    image_intensity             = carve(image_intensity, image_seam, orientation: opts[:orientation])
+
+    crop_mask                   = carve(crop_mask, image_seam, orientation: opts[:orientation]) if crop_mask
+    preserve_mask               = carve(preserve_mask, image_seam, orientation: opts[:orientation]) if preserve_mask
+
+    image_sobel                 = sobel(
+                                    image_intensity,
+                                    crop_mask: crop_mask,
+                                    preserve_mask: preserve_mask
+                                  )
+    image_seam, image_memo      = seam(image_sobel, orientation: opts[:orientation], pad: true)
+  end
+
+  image                         = carve(image, image_seam, orientation: opts[:orientation])
+
+  case opts[:output]
+  when :image
+    write_io_matrix_color(image)
+  when :intensity
+    write_io_matrix_normalized_scalar(normalize(image_intensity))
+  when :sobel
+    write_io_matrix_normalized_scalar(normalize(image_sobel))
+  when :memo
+    write_io_matrix_normalized_scalar(normalize(image_memo))
+  when :memo_curved
+    write_io_matrix_normalized_scalar(power(normalize(image_memo), p = 1.0 / 3.8))
+  when :seam
+    write_io_matrix_seam(prev_image, image_seam, orientation: opts[:orientation], overlay: nil)
+  when :seam_overlay_image
+    write_io_matrix_seam(prev_image, image_seam, orientation: opts[:orientation], overlay: :image)
+  when :seam_overlay_sobel
+    write_io_matrix_seam(image_sobel, image_seam[1..-2], orientation: opts[:orientation], overlay: :scalar)
+  when :seam_overlay_memo
+    write_io_matrix_seam(image_memo, image_seam[1..-2], orientation: opts[:orientation], overlay: :scalar)
+  end
+end
+
+main

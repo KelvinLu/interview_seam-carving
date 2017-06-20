@@ -1,0 +1,30 @@
+#!/usr/bin/env ruby
+
+require 'chunky_png'
+
+if ARGV.length > 0
+  $stderr.puts "Usage: #{__FILE__} (program reads from standard input)"
+  exit 1
+end
+
+width = nil
+rows = []
+
+begin
+  while (row = $stdin.readline.split(',').compact)
+    raise 'Row elements could not be formed into 4-tuples' unless ((length = row.length) % 4).zero?
+    width ||= length / 4
+    raise "Row has mismatched number of elements (expected #{width}, got #{length / 4})" unless width * 4 == length
+
+    rows << (0..(length - 1)).step(4).map { |i| ChunkyPNG::Color.rgba(*row[i, 4].map(&:to_i)) }
+  end
+rescue EOFError
+end
+
+image = ChunkyPNG::Canvas.new(width, rows.length)
+
+for y in 0..(rows.length - 1)
+  image.replace_row!(y, rows[y])
+end
+
+image.write($stdout)
