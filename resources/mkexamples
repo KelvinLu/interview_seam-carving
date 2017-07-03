@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+
+set -o pipefail
+set -o errexit
+set -o nounset
+
+declare -r bin_path="../bin"
+declare -r images_path="./images"
+declare -r masks_path="./masks"
+declare -r examples_path="./examples"
+
+# Things without masks...
+for img in ${images_path}/*.png; do
+  continue
+
+  declare filename="${img##*/}"
+  declare basename="${filename%.*}"
+
+  echo "Processing ${filename}..."
+
+  mkdir -p "${examples_path}/${basename}"
+
+  # _intensity
+  echo '  _intensity'
+  "${bin_path}/png2txt" < "${img}" | "${bin_path}/carvetxt" \
+    --iterations 1 \
+    --text seam_overlay_image \
+    | "${bin_path}"/txt2png > "${examples_path}/${basename}/${basename}_intensity.png"
+
+  # _sobel
+  echo '  _sobel'
+  "${bin_path}/png2txt" < "${img}" | "${bin_path}/carvetxt" \
+    --iterations 1 \
+    --text seam_overlay_sobel \
+    | "${bin_path}"/txt2png > "${examples_path}/${basename}/${basename}_sobel.png"
+
+  # _minimal-path-memo_h
+  echo '  _minimal-path-memo_h'
+  "${bin_path}/png2txt" < "${img}" | "${bin_path}/carvetxt" \
+    --iterations 1 \
+    --orientation horizontal \
+    --text seam_overlay_memo \
+    | "${bin_path}"/txt2png > "${examples_path}/${basename}/${basename}_minimal-path-memo_h.png"
+
+  # _minimal-path-memo_v
+  echo '  _minimal-path-memo_v'
+  "${bin_path}/png2txt" < "${img}" | "${bin_path}/carvetxt" \
+    --iterations 1 \
+    --orientation vertical \
+    --text seam_overlay_memo \
+    | "${bin_path}"/txt2png > "${examples_path}/${basename}/${basename}_minimal-path-memo_v.png"
+
+  # _squashed_h50px
+  echo '  _squashed_h50px'
+  "${bin_path}/png2txt" < "${img}" | "${bin_path}/carvetxt" \
+    --iterations 50 \
+    --verbose \
+    --orientation horizontal \
+    --text image \
+    | "${bin_path}"/txt2png > "${examples_path}/${basename}/${basename}_squashed_h50px.png"
+
+  # _squashed_v50px
+  echo '  _squashed_v50px'
+  "${bin_path}/png2txt" < "${img}" | "${bin_path}/carvetxt" \
+    --iterations 50 \
+    --verbose \
+    --orientation vertical \
+    --text image \
+    | "${bin_path}"/txt2png > "${examples_path}/${basename}/${basename}_squashed_v50px.png"
+done
+
+# Things with masks...
+for mask in ${masks_path}/*.png; do
+  declare filename="${mask##*/}"
+  declare basename="${filename%.*}"
+
+  echo "Processing ${filename}..."
+
+  "${bin_path}/png2txt" < "${mask}" > "${masks_path}/${basename}.txt"
+  mkdir -p "${examples_path}/${basename}"
+done
+
+# square-wallet-ad-preserve-mask
+echo "Processing square-wallet-ad-preserve-mask..."
+"${bin_path}/png2txt" < "${images_path}/square-wallet-ad.png" | "${bin_path}/carvetxt" \
+  --iterations 1 \
+  --preserve-mask "${masks_path}/square-wallet-ad-preserve-mask.txt" \
+  --orientation horizontal \
+  --text seam_overlay_sobel \
+  | "${bin_path}"/txt2png > "${examples_path}/square-wallet-ad-preserve-mask/square-wallet-ad_sobel-masked.png"
+"${bin_path}/png2txt" < "${images_path}/square-wallet-ad.png" | "${bin_path}/carvetxt" \
+  --iterations 1 \
+  --preserve-mask "${masks_path}/square-wallet-ad-preserve-mask.txt" \
+  --orientation horizontal \
+  --text seam_overlay_memo \
+  | "${bin_path}"/txt2png > "${examples_path}/square-wallet-ad-preserve-mask/square-wallet-ad_memo_h-masked.png"
+"${bin_path}/png2txt" < "${images_path}/square-wallet-ad.png" | "${bin_path}/carvetxt" \
+  --iterations 50 \
+  --preserve-mask "${masks_path}/square-wallet-ad-preserve-mask.txt" \
+  --verbose \
+  --orientation horizontal \
+  --text image \
+  | "${bin_path}"/txt2png > "${examples_path}/square-wallet-ad-preserve-mask/square-wallet-ad_squashed_h50px-masked.png"
+
+# ucd-cycling-crop-mask
+echo "Processing ucd-cycling-crop-mask..."
+"${bin_path}/png2txt" < "${images_path}/ucd-cycling.png" | "${bin_path}/carvetxt" \
+  --iterations 1 \
+  --crop-mask "${masks_path}/ucd-cycling-ad-crop-mask.txt" \
+  --orientation vertical \
+  --text seam_overlay_sobel \
+  | "${bin_path}"/txt2png > "${examples_path}/ucd-cycling-crop-mask/ucd-cycling_sobel-masked.png"
+"${bin_path}/png2txt" < "${images_path}/ucd-cycling.png" | "${bin_path}/carvetxt" \
+  --iterations 1 \
+  --crop-mask "${masks_path}/ucd-cycling-ad-crop-mask.txt" \
+  --orientation vertical \
+  --text seam_overlay_memo \
+  | "${bin_path}"/txt2png > "${examples_path}/ucd-cycling-crop-mask/ucd-cycling_memo_v-masked.png"
+"${bin_path}/png2txt" < "${images_path}/ucd-cycling.png" | "${bin_path}/carvetxt" \
+  --iterations 50 \
+  --crop-mask "${masks_path}/ucd-cycling-ad-crop-mask.txt" \
+  --verbose \
+  --orientation vertical \
+  --text image \
+  | "${bin_path}"/txt2png > "${examples_path}/ucd-cycling-crop-mask/ucd-cycling_squashed_v50px-masked.png"

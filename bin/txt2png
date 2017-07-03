@@ -12,11 +12,17 @@ rows = []
 
 begin
   while (row = $stdin.readline.split(',').compact)
-    raise 'Row elements could not be formed into 4-tuples' unless ((length = row.length) % 4).zero?
-    width ||= length / 4
-    raise "Row has mismatched number of elements (expected #{width}, got #{length / 4})" unless width * 4 == length
+    width ||= (length = row.length)
+    raise "Row has mismatched number of elements (expected #{width}, got #{length})" unless width == length
 
-    rows << (0..(length - 1)).step(4).map { |i| ChunkyPNG::Color.rgba(*row[i, 4].map(&:to_i)) }
+    rows << row.map(&:to_f).map { |i|
+      gray = [
+        255,
+        (255.0 * (i ** (0.454545))).to_i
+      ].min
+
+      ChunkyPNG::Color.rgb(gray, gray, gray)
+    }
   end
 rescue EOFError
 end

@@ -11,6 +11,15 @@ image = ChunkyPNG::Image.from_io($stdin)
 
 for y in 0..(image.height-1)
   $stdout.puts image.row(y).map { |color|
-    ChunkyPNG::Color.to_truecolor_alpha_bytes(color)
-  }.flatten.join(',')
+    r, g, b = ChunkyPNG::Color.to_truecolor_bytes(color)
+
+    sprintf('%.3f', [
+      1.0,
+      (
+        (0.2126 * (r / 255.0) ** 2.2) +
+        (0.7152 * (g / 255.0) ** 2.2) +
+        (0.0722 * (b / 255.0) ** 2.2)
+      )
+    ].min)
+  }.join(',')
 end
